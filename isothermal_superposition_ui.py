@@ -357,16 +357,21 @@ class IsothermalSuperpositionUI:
 
         # Batch select/unselect region controls
         y_bounds = 0.12
-        bh = 0.055
+        bh = 0.045
         btn_y = 0.03
         btn_h = 0.065
         btn_w = (w - 0.03) / 2.0
 
+        bound_w = w * 0.44
+        col_gap = w * 0.12
+        row_gap = 0.020
+        y_top = y_bounds + bh + row_gap
+
         bound_fields = [
-            ("bound_x_min", "x lower [m]", f"{self.cfg['grid_view_x_min']:.2f}", [x0, y_bounds + bh + 0.012, w * 0.48, bh]),
-            ("bound_x_max", "x upper [m]", f"{self.cfg['grid_view_x_max']:.2f}", [x0 + w * 0.52, y_bounds + bh + 0.012, w * 0.48, bh]),
-            ("bound_d_min", "depth lower [m]", f"{self.cfg['grid_step']:.2f}", [x0, y_bounds, w * 0.48, bh]),
-            ("bound_d_max", "depth upper [m]", f"{self.cfg['grid_view_depth_max']:.2f}", [x0 + w * 0.52, y_bounds, w * 0.48, bh]),
+            ("bound_x_min", "x lower [m]", f"{self.cfg['grid_view_x_min']:.2f}", [x0, y_top, bound_w, bh]),
+            ("bound_x_max", "x upper [m]", f"{self.cfg['grid_view_x_max']:.2f}", [x0 + bound_w + col_gap, y_top, bound_w, bh]),
+            ("bound_d_min", "depth lower [m]", f"{self.cfg['grid_step']:.2f}", [x0, y_bounds, bound_w, bh]),
+            ("bound_d_max", "depth upper [m]", f"{self.cfg['grid_view_depth_max']:.2f}", [x0 + bound_w + col_gap, y_bounds, bound_w, bh]),
         ]
         for key, label, initial, pos in bound_fields:
             ax = self.fig_controls.add_axes(pos)
