@@ -296,8 +296,9 @@ class IsothermalSuperpositionUI:
         self._last_contour_paths: list = []
 
         # Event bindings
-        self.fig.canvas.mpl_connect("button_press_event", self._on_click)
-        self.fig.canvas.mpl_connect("key_press_event", self._on_key)
+        self.fig_input.canvas.mpl_connect("button_press_event", self._on_click)
+        self.fig_input.canvas.mpl_connect("key_press_event", self._on_key)
+        self.fig_result.canvas.mpl_connect("key_press_event", self._on_key)
 
         # Initial draw (empty)
         self.redraw()
@@ -349,7 +350,7 @@ class IsothermalSuperpositionUI:
         return True
 
     def _on_click(self, event):
-        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+        if event.inaxes != self.ax_input or event.xdata is None or event.ydata is None:
             return
         if event.button == 1:  # left
             snapped = self._snap_in_grid(event.xdata, event.ydata)
@@ -389,9 +390,9 @@ class IsothermalSuperpositionUI:
         self._draw_sources_and_images()
         self._draw_title_and_status()
         self._draw_controls_footer()
-        self.fig.canvas.draw_idle()
+        self.fig_result.canvas.draw_idle()
 
-    def _init_axes(self):
+    def _init_axes(self, ax):
         c = self.cfg
         # Above-ground strip: just enough to show every image marker, with a
         # 0.3 m floor for a visible reference strip when nothing is placed
@@ -418,7 +419,7 @@ class IsothermalSuperpositionUI:
         XX, DD = np.meshgrid(xs, ds)
         self.ax.plot(XX, DD, ".", color="0.85", markersize=1.5, zorder=1)
 
-    def _draw_ground_line(self):
+    def _draw_ground_line(self, ax):
         c = self.cfg
         self.ax.axhline(0.0, color="green", linewidth=1.4, zorder=4)
         self.ax.text(c["grid_x_max"], -0.04, " ground (depth = 0)",
@@ -500,7 +501,7 @@ class IsothermalSuperpositionUI:
             self.ax.plot([], [], "x", color="cyan", markeredgewidth=1.5,
                           markersize=9, label="image sources (above ground)")
 
-    def _draw_title_and_status(self):
+    def _draw_title_and_status(self, ax, show_summary: bool):
         c = self.cfg
         n = len(self.sources)
         T_target = c["T_amb"] + c["epsilon_K"]
