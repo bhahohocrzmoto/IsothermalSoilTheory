@@ -296,6 +296,7 @@ class IsothermalSuperpositionUI:
         self.ax_thermal = self.fig_thermal.add_subplot(gs[0])
         self.cax_thermal = self.fig_thermal.add_subplot(gs[1])
         self.cax_thermal.set_visible(False)
+        self.epsilon_levels: list[float] = [self.cfg["epsilon_K"]]
         self._build_controls_panel()
 
         # Cached evaluation grid (allocated once)
@@ -303,7 +304,6 @@ class IsothermalSuperpositionUI:
 
         # Cached last contour paths (for save_all)
         self._last_contour_paths: list = []
-        self.epsilon_levels: list[float] = [self.cfg["epsilon_K"]]
 
         # Event bindings (both windows)
         self.fig_grid.canvas.mpl_connect("button_press_event", self._on_click)
