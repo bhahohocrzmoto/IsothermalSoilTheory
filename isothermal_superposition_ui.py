@@ -353,6 +353,8 @@ class IsothermalSuperpositionUI:
         self._rebuild_epsilon_boxes()
 
     def _rebuild_epsilon_boxes(self):
+        if not hasattr(self, "epsilon_levels") or not self.epsilon_levels:
+            self.epsilon_levels = [float(self.cfg.get("epsilon_K", 5.0))]
         for ax in self._epsilon_axes:
             ax.remove()
         self._epsilon_axes = []
@@ -386,6 +388,9 @@ class IsothermalSuperpositionUI:
         if vals:
             self.epsilon_levels = vals
             self.cfg["epsilon_K"] = vals[0]
+            t_iso_box = self._controls.get("T_isothermal")
+            if t_iso_box is not None:
+                t_iso_box.set_val(f"{self.cfg['T_amb'] + vals[0]:.2f}")
             self.redraw()
 
     def _on_params_submit(self, _text):
@@ -404,6 +409,7 @@ class IsothermalSuperpositionUI:
                 self.cfg["epsilon_K"] = eps_from_t
                 if self.epsilon_levels:
                     self.epsilon_levels[0] = eps_from_t
+                    self._epsilon_boxes[0].set_val(f"{eps_from_t:.2f}")
             for s in self.sources:
                 s.q_Wpm = q
             self.redraw()
