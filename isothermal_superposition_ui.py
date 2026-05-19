@@ -355,6 +355,32 @@ class IsothermalSuperpositionUI:
         self._controls["add_eps_ax"] = ax_add
         self._rebuild_epsilon_boxes()
 
+        # Batch select/unselect region controls
+        y_bounds = 0.03
+        bw = 0.20
+        bh = 0.07
+        bgap = 0.02
+
+        bound_fields = [
+            ("bound_x_min", "x lower [m]", f"{self.cfg['grid_view_x_min']:.2f}", [x0, y_bounds + bh + 0.01, w * 0.48, bh]),
+            ("bound_x_max", "x upper [m]", f"{self.cfg['grid_view_x_max']:.2f}", [x0 + w * 0.52, y_bounds + bh + 0.01, w * 0.48, bh]),
+            ("bound_d_min", "depth lower [m]", f"{self.cfg['grid_step']:.2f}", [x0, y_bounds, w * 0.48, bh]),
+            ("bound_d_max", "depth upper [m]", f"{self.cfg['grid_view_depth_max']:.2f}", [x0 + w * 0.52, y_bounds, w * 0.48, bh]),
+        ]
+        for key, label, initial, pos in bound_fields:
+            ax = self.fig_controls.add_axes(pos)
+            box = TextBox(ax, label=label, initial=initial)
+            self._controls[key] = box
+
+        ax_sel = self.fig_controls.add_axes([x0, 0.90, bw, bh])
+        ax_unsel = self.fig_controls.add_axes([x0 + bw + bgap, 0.90, bw, bh])
+        btn_sel = Button(ax_sel, "Select")
+        btn_unsel = Button(ax_unsel, "Unselect")
+        btn_sel.on_clicked(self._on_select_bounds)
+        btn_unsel.on_clicked(self._on_unselect_bounds)
+        self._controls["select_btn"] = btn_sel
+        self._controls["unselect_btn"] = btn_unsel
+
     def _rebuild_epsilon_boxes(self):
         if not hasattr(self, "epsilon_levels") or not self.epsilon_levels:
             self.epsilon_levels = [float(self.cfg.get("epsilon_K", 5.0))]
@@ -464,6 +490,62 @@ class IsothermalSuperpositionUI:
         ))
         self.next_id += 1
         return True
+
+    def _parse_bounds(self) -> Optional[tuple[float, float, float, float]]:
+        try:
+            x_lo = float(self._controls["bound_x_min"].text)
+            x_hi = float(self._controls["bound_x_max"].text)
+            d_lo = float(self._controls["bound_d_min"].text)
+            d_hi = float(self._controls["bound_d_max"].text)
+        except (ValueError, KeyError):
+            return None
+        if not (math.isfinite(x_lo) and math.isfinite(x_hi) and math.isfinite(d_lo) and math.isfinite(d_hi)):
+            return None
+        if x_lo > x_hi:
+            x_lo, x_hi = x_hi, x_lo
+        if d_lo > d_hi:
+            d_lo, d_hi = d_hi, d_lo
+        return x_lo, x_hi, d_lo, d_hi
+
+    def _iter_boundary_points(self, bounds: tuple[float, float, float, float]):
+        x_lo, x_hi, d_lo, d_hi = bounds
+        step = self.cfg["grid_step"]
+        x0 = snap_to_grid(x_lo, step)
+        x1 = snap_to_grid(x_hi, step)
+        d0 = snap_to_grid(d_lo, step)
+        d1 = snap_to_grid(d_hi, step)
+        xs = np.arange(min(x0, x1), max(x0, x1) + 0.5 * step, step)
+        ds = np.arange(min(d0, d1), max(d0, d1) + 0.5 * step, step)
+        for x in xs:
+            for d in ds:
+                snapped = self._snap_in_grid(float(x), float(d))
+                if snapped is not None:
+                    yield snapped
+
+    def _on_select_bounds(self, _event):
+        bounds = self._parse_bounds()
+        if bounds is None:
+            return
+        changed = False
+        for x_s, d_s in self._iter_boundary_points(bounds):
+            changed = self._add_source(x_s, d_s) or changed
+        if changed:
+            self.redraw()
+
+    def _on_unselect_bounds(self, _event):
+        bounds = self._parse_bounds()
+        if bounds is None:
+            return
+        wanted = set(self._iter_boundary_points(bounds))
+        if not wanted:
+            return
+        before = len(self.sources)
+        self.sources = [
+            s for s in self.sources
+            if (s.x_m, s.depth_m) not in wanted
+        ]
+        if len(self.sources) != before:
+            self.redraw()
 
     def _on_click(self, event):
         # Figure 2 (thermal field) is intentionally read-only: users may pan/zoom
@@ -691,6 +773,7 @@ class IsothermalSuperpositionUI:
     def _draw_controls_footer(self):
         controls_grid = (
             "left-click: add  ·  right-click: remove nearest  ·  "
+            "box-select/unselect: controls window  ·  "
             "R: reset  ·  C/Enter: recompute  ·  S: save  ·  Esc: close"
         )
         controls_thermal = (
