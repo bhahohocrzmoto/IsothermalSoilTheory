@@ -322,8 +322,8 @@ class IsothermalSuperpositionUI:
         self._controls: dict[str, object] = {}
         x0 = 0.10
         w = 0.80
-        h = 0.10
-        gap = 0.03
+        h = 0.08
+        gap = 0.025
         y = 0.84
 
         # Parameters
@@ -356,10 +356,10 @@ class IsothermalSuperpositionUI:
         self._rebuild_epsilon_boxes()
 
         # Batch select/unselect region controls
-        y_bounds = 0.03
-        bw = 0.20
+        y_bounds = 0.07
+        bw = 0.24
         bh = 0.07
-        bgap = 0.02
+        bgap = 0.03
 
         bound_fields = [
             ("bound_x_min", "x lower [m]", f"{self.cfg['grid_view_x_min']:.2f}", [x0, y_bounds + bh + 0.01, w * 0.48, bh]),
@@ -372,8 +372,8 @@ class IsothermalSuperpositionUI:
             box = TextBox(ax, label=label, initial=initial)
             self._controls[key] = box
 
-        ax_sel = self.fig_controls.add_axes([x0, 0.90, bw, bh])
-        ax_unsel = self.fig_controls.add_axes([x0 + bw + bgap, 0.90, bw, bh])
+        ax_sel = self.fig_controls.add_axes([x0, 0.01, bw, bh])
+        ax_unsel = self.fig_controls.add_axes([x0 + bw + bgap, 0.01, bw, bh])
         btn_sel = Button(ax_sel, "Select")
         btn_unsel = Button(ax_unsel, "Unselect")
         btn_sel.on_clicked(self._on_select_bounds)
