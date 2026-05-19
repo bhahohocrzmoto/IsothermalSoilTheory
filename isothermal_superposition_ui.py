@@ -69,7 +69,7 @@ from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.widgets import Button
+from matplotlib.gridspec import GridSpec
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +86,8 @@ DEFAULTS = dict(
     T_amb=20.0,            # °C
     epsilon_K=5.0,         # K
     q_source_Wpm=30.0,     # W/m, equal per source in v1
-    result_nx=800,
-    result_ny=500,
+    field_res_x=400,
+    field_res_y=400,
     r_cutoff_m=0.01,       # singularity cutoff
 )
 
@@ -279,30 +279,50 @@ class IsothermalSuperpositionUI:
         self.cfg = cfg
         self.sources: list[Source2D] = []
         self.next_id = 1
-        self.result_fig: Optional[plt.Figure] = None
-        self._last_contour_paths: list = []
-        self._last_result_payload: Optional[dict] = None
 
-        # Source-selection figure only.
-        self.fig, self.ax = plt.subplots(figsize=(9.5, 7.5))
-        self.fig.subplots_adjust(left=0.10, right=0.97, top=0.92, bottom=0.17)
-        run_ax = self.fig.add_axes([0.80, 0.05, 0.14, 0.06])
-        self.run_button = Button(run_ax, "Run")
-        self.run_button.on_clicked(self._on_run_clicked)
+        # Figure 1: source-selection grid (input window)
+        self.fig_input = plt.figure(figsize=(11.5, 7.5))
+        self.ax_input = self.fig_input.add_subplot(111)
+
+        # Figure 2: temperature field (result window)
+        self.fig_result = plt.figure(figsize=(11.5, 7.5))
+        gs = GridSpec(1, 2, width_ratios=[40, 1], wspace=0.08,
+                      left=0.07, right=0.95, top=0.92, bottom=0.10,
+                      figure=self.fig_result)
+        self.ax_result = self.fig_result.add_subplot(gs[0])
+        self.cax_result = self.fig_result.add_subplot(gs[1])
+        self.cax_result.set_visible(False)
+        # Backward-compatible aliases for older code paths/extensions that
+        # still expect single-figure attribute names.
+        self.fig = self.fig_input
+        self.ax = self.ax_input
+        self.cax = self.cax_result
+
+        # Cached evaluation grid (allocated once)
+        self._eval_grid: Optional[tuple[np.ndarray, np.ndarray]] = None
+
+        # Cached last contour paths (for save_all)
+        self._last_contour_paths: list = []
+        self._input_footer_text = None
+        self._result_footer_text = None
 
         # Event bindings
-        self.fig.canvas.mpl_connect("button_press_event", self._on_click)
-        self.fig.canvas.mpl_connect("key_press_event", self._on_key)
+        self.fig_input.canvas.mpl_connect("button_press_event", self._on_click)
+        self.fig_input.canvas.mpl_connect("key_press_event", self._on_key)
+        self.fig_result.canvas.mpl_connect("key_press_event", self._on_key)
 
+        # Initial draw (empty)
         self.redraw()
 
     # ------------------------------- input ----------------------------------
 
-    def _result_grid(self):
-        c = self.cfg
-        x = np.linspace(c["result_x_min"], c["result_x_max"], c["result_nx"])
-        y_plot = np.linspace(c["result_y_min"], c["result_y_max"], c["result_ny"])
-        return np.meshgrid(x, y_plot)
+    def _ensure_eval_grid(self):
+        if self._eval_grid is None:
+            c = self.cfg
+            x = np.linspace(c["grid_x_min"], c["grid_x_max"], c["field_res_x"])
+            d = np.linspace(c["depth_min"], c["depth_max"], c["field_res_y"])
+            self._eval_grid = np.meshgrid(x, d)
+        return self._eval_grid
 
     def _snap_in_grid(self, x: float, depth: float) -> Optional[tuple[float, float]]:
         c = self.cfg
@@ -341,7 +361,7 @@ class IsothermalSuperpositionUI:
         return True
 
     def _on_click(self, event):
-        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+        if event.inaxes != self.ax_input or event.xdata is None or event.ydata is None:
             return
         if event.button == 1:  # left
             snapped = self._snap_in_grid(event.xdata, event.ydata)
@@ -361,72 +381,182 @@ class IsothermalSuperpositionUI:
             self.sources = []
             self.next_id = 1
             self.redraw()
+        elif k in ("c", "enter"):
+            self.redraw()
         elif k == "s":
             self.save_all()
         elif k == "escape":
-            plt.close(self.fig)
-        elif k in ("c", "enter"):
-            self._on_run_clicked(None)
-
-    def _on_run_clicked(self, _event):
-        if not self.sources:
-            print("No sources selected. Add at least one source before Run.")
-            return
-        self._make_result_figure()
+            plt.close(self.fig_input)
+            plt.close(self.fig_result)
 
     # ------------------------------- drawing --------------------------------
 
     def redraw(self):
-        self.ax.clear()
-        self._init_axes()
-        self._draw_grid_dots()
-        self._draw_ground_line()
-        self._draw_sources_only()
-        self._draw_title_and_status()
+        self._redraw_input()
+        self._redraw_result()
+
+    def _redraw_input(self):
+        self.ax_input.clear()
+        self._init_axes(self.ax_input)
+        self._draw_grid_dots(self.ax_input)
+        self._draw_ground_line(self.ax_input)
+        self._draw_sources_and_images(self.ax_input)
+        self._draw_title_and_status(self.ax_input, show_summary=False)
+        self.fig_input.canvas.draw_idle()
+
+    def _redraw_result(self):
+        self.ax_result.clear()
+        self.cax_result.clear()
+        self.cax_result.set_visible(False)
+        self._init_axes(self.ax_result)
+        self._draw_grid_dots(self.ax_result)
+        self._draw_field(self.ax_result)  # also draws 5 K contour, populates cax
+        self._draw_ground_line(self.ax_result)
+        self._draw_sources_and_images(self.ax_result)
+        self._draw_title_and_status(self.ax_result, show_summary=True)
         self._draw_controls_footer()
-        self.fig.canvas.draw_idle()
+        self.fig_result.canvas.draw_idle()
 
-    def _init_axes(self):
+    def _init_axes(self, ax):
         c = self.cfg
-        self.ax.set_xlim(c["grid_x_min"], c["grid_x_max"])
-        self.ax.set_ylim(c["depth_max"], c["depth_min"])
-        self.ax.set_xlabel("x [m]")
-        self.ax.set_ylabel("depth [m]   (positive downward)")
-        self.ax.set_aspect("equal", adjustable="box")
-        self.ax.set_xticks(np.arange(c["grid_x_min"], c["grid_x_max"] + 0.5 * c["grid_step"], c["grid_step"]))
-        self.ax.set_yticks(np.arange(c["depth_min"], c["depth_max"] + 0.5 * c["grid_step"], c["grid_step"]))
-        self.ax.grid(True, color="0.82", linewidth=0.7)
+        # Above-ground strip: just enough to show every image marker, with a
+        # 0.3 m floor for a visible reference strip when nothing is placed
+        # yet, and a cap at 50 % of depth_max to avoid wasting plot real
+        # estate for deep-source / large-domain cases.
+        if self.sources:
+            max_src_depth = max(s.depth_m for s in self.sources)
+        else:
+            max_src_depth = 0.0
+        strip = max(0.3, min(max_src_depth + 0.2, 0.5 * c["depth_max"]))
+        ax.set_xlim(c["grid_x_min"] - 0.05, c["grid_x_max"] + 0.05)
+        ax.set_ylim(c["depth_max"] + 0.05, -strip)
+        ax.set_xlabel("x [m]")
+        ax.set_ylabel("depth [m]   (positive downward)")
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(False)
 
-    def _draw_grid_dots(self):
+    def _draw_grid_dots(self, ax):
         c = self.cfg
         xs = np.arange(c["grid_x_min"], c["grid_x_max"] + 0.5 * c["grid_step"], c["grid_step"])
-        ds = np.arange(c["depth_min"],
+        ds = np.arange(c["depth_min"] + c["grid_step"],
                        c["depth_max"] + 0.5 * c["grid_step"],
                        c["grid_step"])
         XX, DD = np.meshgrid(xs, ds)
-        self.ax.plot(XX, DD, ".", color="0.75", markersize=1.4, zorder=1)
+        ax.plot(XX, DD, ".", color="0.85", markersize=1.5, zorder=1)
 
-    def _draw_ground_line(self):
+    def _draw_ground_line(self, ax):
         c = self.cfg
-        self.ax.axhline(0.0, color="green", linewidth=1.4, zorder=4)
-        self.ax.text(c["grid_x_max"], 0.0, " ground (depth = 0)",
-                     color="green", va="bottom", ha="right", fontsize=8, zorder=4)
+        ax.axhline(0.0, color="green", linewidth=1.4, zorder=4)
+        ax.text(c["grid_x_max"], -0.04, " ground (depth = 0)",
+                color="green", va="bottom", ha="right", fontsize=8, zorder=4)
 
-    def _draw_sources_only(self):
+    def _draw_field(self, ax):
+        c = self.cfg
+        if not self.sources:
+            self.cax_result.set_visible(False)
+            self._last_contour_paths = []
+            return
+
+        X, D = self._ensure_eval_grid()
+        theta = theta_superposition_ui(X, D, self.sources, c["k_soil"], c["r_cutoff_m"])
+
+        # Cap colourbar so source singularities don't dominate the scale
+        finite = theta[np.isfinite(theta)]
+        vmax_clip = float(np.percentile(finite, 99.0))
+        vmax_show = max(vmax_clip, 1.5 * c["epsilon_K"])
+        theta_disp = np.clip(theta, 0.0, vmax_show)
+
+        cf = ax.contourf(X, D, theta_disp, levels=20, cmap="inferno", zorder=2)
+        self.cax_result.set_visible(True)
+        cbar = self.fig_result.colorbar(cf, cax=self.cax_result)
+        cbar.set_label(r"Temperature rise $\theta$ [K]")
+
+        # Target isotherm
+        cs = ax.contour(X, D, theta, levels=[c["epsilon_K"]],
+                              colors="cyan", linewidths=2.0, zorder=5)
+        try:
+            ax.clabel(cs, fmt={c["epsilon_K"]: f"{c['epsilon_K']:g} K"},
+                            fontsize=9)
+        except Exception:
+            pass
+
+        self._last_contour_paths = get_paths_compat(cs)
+
+        # Domain-too-small warning
+        if any(self._contour_touches_plot_edge(p.vertices) for p in self._last_contour_paths):
+            ax.text(
+                c["grid_x_min"] + 0.05, c["depth_max"] - 0.08,
+                "⚠  ε-contour reaches plot edge — domain may be too small.\n"
+                "    Increase --depth-max / --x-min / --x-max or lower --q.",
+                color="yellow", fontsize=9,
+                bbox=dict(facecolor="black", edgecolor="yellow", alpha=0.85, pad=4),
+                zorder=6,
+            )
+
+    def _contour_touches_plot_edge(self, verts: np.ndarray) -> bool:
+        c = self.cfg
+        # tolerance = one pixel
+        tol_x = (c["grid_x_max"] - c["grid_x_min"]) / c["field_res_x"]
+        tol_d = (c["depth_max"] - c["depth_min"]) / c["field_res_y"]
+        x0, x1 = c["grid_x_min"], c["grid_x_max"]
+        d1 = c["depth_max"]
+        return bool(
+            np.any(np.abs(verts[:, 0] - x0) < tol_x) or
+            np.any(np.abs(verts[:, 0] - x1) < tol_x) or
+            np.any(np.abs(verts[:, 1] - d1) < tol_d)
+        )
+
+    def _draw_sources_and_images(self, ax):
+        c = self.cfg
         for s in self.sources:
-            self.ax.plot(s.x_m, s.depth_m, "o",
-                          markersize=7, color="tab:red", markeredgecolor="black",
+            # Real source
+            ax.plot(s.x_m, s.depth_m, "o",
+                          markersize=9, color="white", markeredgecolor="black",
                           zorder=7)
+            ax.text(s.x_m + 0.04, s.depth_m, f"#{s.id}",
+                          fontsize=7, color="white",
+                          bbox=dict(facecolor="black", edgecolor="none", alpha=0.6, pad=1),
+                          va="center", zorder=8)
+            # Image (drawn at depth_ui = -depth_source, i.e. above ground;
+            # clipped naturally if outside view limits)
+            ax.plot(s.x_m, -s.depth_m, "x",
+                          markersize=9, color="cyan", markeredgewidth=1.5,
+                          zorder=7)
+        if self.sources:
+            ax.plot([], [], "x", color="cyan", markeredgewidth=1.5,
+                          markersize=9, label="image sources (above ground)")
 
-    def _draw_title_and_status(self):
+    def _draw_title_and_status(self, ax, show_summary: bool):
         c = self.cfg
         n = len(self.sources)
         T_target = c["T_amb"] + c["epsilon_K"]
-        title = f"Source selection (n = {n})"
-        self.ax.set_title(title, fontsize=9, pad=14)
-        status = f"q={c['q_source_Wpm']:.2f} W/m, k={c['k_soil']:.3g} W/(m·K), ε={c['epsilon_K']:.2f} K"
-        self.ax.text(0.01, 0.98, status, transform=self.ax.transAxes,
-                     fontsize=8, color="0.1", va="top", ha="left", zorder=9)
+        title = (
+            f"n = {n}    q = {c['q_source_Wpm']:.2f} W/m    "
+            f"k = {c['k_soil']:.3g} W/(m·K)    "
+            f"T_amb = {c['T_amb']:.1f} °C    "
+            f"ε = {c['epsilon_K']:.2f} K  →  isotherm at T = {T_target:.2f} °C"
+        )
+        ax.set_title(title, fontsize=9, pad=14)
+
+        # Summary text in plot corner
+        if self.sources and show_summary:
+            n_paths = len(self._last_contour_paths)
+            n_closed = sum(1 for p in self._last_contour_paths if is_closed_path(p.vertices))
+            gp_max = ground_plane_residual(self.sources, c["k_soil"], c)
+            inside = self._count_sources_inside_contour()
+            largest_area = self._largest_closed_area()
+            summary = (
+                f"contour segments: {n_paths}    closed: {n_closed}\n"
+                f"largest closed area: {largest_area:.3f} m²\n"
+                f"sources inside contour: {inside} / {len(self.sources)}\n"
+                f"max |θ(x, depth=0)| : {gp_max:.2e} K  (image-method residual)"
+            )
+            ax.text(
+                0.01, 0.98, summary, transform=ax.transAxes,
+                fontsize=8, color="white", va="top", ha="left",
+                bbox=dict(facecolor="black", edgecolor="0.4", alpha=0.7, pad=4),
+                zorder=9,
+            )
 
     def _count_sources_inside_contour(self) -> int:
         """How many real sources lie inside at least one closed contour."""
@@ -447,49 +577,18 @@ class IsothermalSuperpositionUI:
     def _draw_controls_footer(self):
         controls = (
             "left-click: add  ·  right-click: remove nearest  ·  "
-            "R: reset  ·  S: save  ·  Run button: solve field  ·  Esc: close"
+            "R: reset  ·  C/Enter: recompute  ·  S: save  ·  Esc: close"
         )
-        self.fig.text(0.5, 0.015, controls, fontsize=8, color="0.25",
-                       ha="center", va="bottom")
-
-    def _make_result_figure(self):
-        c = self.cfg
-        X_plot, Y_plot = self._result_grid()
-        theta = theta_superposition_ui(X_plot, Y_plot, self.sources, c["k_soil"], c["r_cutoff_m"])
-
-        fig, ax = plt.subplots(figsize=(11.5, 7.5))
-        finite = theta[np.isfinite(theta)]
-        vmax_clip = float(np.percentile(finite, 99.0))
-        vmax_show = max(vmax_clip, 1.5 * c["epsilon_K"])
-        theta_disp = np.clip(theta, 0.0, vmax_show)
-
-        cf = ax.contourf(X_plot, Y_plot, theta_disp, levels=24, cmap="inferno")
-        cbar = fig.colorbar(cf, ax=ax)
-        cbar.set_label(r"Temperature rise $\theta$ [K]")
-        cs = ax.contour(X_plot, Y_plot, theta, levels=[c["epsilon_K"]], colors="cyan", linewidths=2.0)
-        self._last_contour_paths = get_paths_compat(cs)
-        try:
-            ax.clabel(cs, fmt={c["epsilon_K"]: f"{c['epsilon_K']:g} K"}, fontsize=9)
-        except Exception:
-            pass
-
-        for s in self.sources:
-            ax.plot(s.x_m, s.depth_m, "o", color="white", markeredgecolor="black", markersize=8, label="_nolegend_")
-            ax.plot(s.x_m, -s.depth_m, "x", color="cyan", markeredgewidth=1.5, markersize=8, label="_nolegend_")
-        ax.plot([], [], "o", color="white", markeredgecolor="black", label="real sources")
-        ax.plot([], [], "x", color="cyan", markeredgewidth=1.5, label="image sources")
-        ax.axhline(0.0, color="green", linewidth=1.4, label="ground plane")
-        ax.set_xlabel("x [m]")
-        ax.set_ylabel("y_plot / depth [m] (positive downward)")
-        ax.set_title("Temperature-rise field with 5 K isotherm")
-        ax.set_aspect("equal", adjustable="box")
-        ax.legend(loc="upper right")
-        ax.set_xlim(c["grid_x_min"], c["grid_x_max"])
-        ax.set_ylim(c["depth_max"], c["depth_min"])
-        fig.canvas.draw_idle()
-
-        self.result_fig = fig
-        self._last_result_payload = {"X": X_plot, "Y": Y_plot, "theta": theta}
+        if self._input_footer_text is not None:
+            self._input_footer_text.remove()
+        if self._result_footer_text is not None:
+            self._result_footer_text.remove()
+        self._input_footer_text = self.fig_input.text(
+            0.5, 0.015, controls, fontsize=8, color="0.25", ha="center", va="bottom"
+        )
+        self._result_footer_text = self.fig_result.text(
+            0.5, 0.015, controls, fontsize=8, color="0.25", ha="center", va="bottom"
+        )
 
     # ------------------------------- save -----------------------------------
 
@@ -502,8 +601,7 @@ class IsothermalSuperpositionUI:
 
         save_sources_csv(self.sources, srcs_csv)
         save_contours_csv(self._last_contour_paths, cnt_csv)
-        target_fig = self.result_fig if self.result_fig is not None else self.fig
-        target_fig.savefig(png_path, dpi=200, bbox_inches="tight")
+        self.fig_result.savefig(png_path, dpi=200, bbox_inches="tight")
 
         print(f"Saved →\n  {srcs_csv}\n  {cnt_csv}\n  {png_path}")
         return {"sources_csv": srcs_csv, "contour_csv": cnt_csv, "png": png_path}
@@ -525,8 +623,8 @@ def parse_cli(argv=None) -> dict:
                    help="target contour level [K] (default 5)")
     p.add_argument("--q", type=float, default=DEFAULTS["q_source_Wpm"],
                    help="per-source heat rate [W/m] (equal for all sources in v1)")
-    p.add_argument("--res-x", type=int, default=DEFAULTS["result_nx"])
-    p.add_argument("--res-y", type=int, default=DEFAULTS["result_ny"])
+    p.add_argument("--res-x", type=int, default=DEFAULTS["field_res_x"])
+    p.add_argument("--res-y", type=int, default=DEFAULTS["field_res_y"])
     p.add_argument("--x-min", type=float, default=DEFAULTS["grid_x_min"])
     p.add_argument("--x-max", type=float, default=DEFAULTS["grid_x_max"])
     p.add_argument("--depth-max", type=float, default=DEFAULTS["depth_max"])
@@ -554,12 +652,8 @@ def parse_cli(argv=None) -> dict:
         T_amb=args.T_amb,
         epsilon_K=args.epsilon,
         q_source_Wpm=args.q,
-        result_nx=args.res_x,
-        result_ny=args.res_y,
-        result_x_min=-100.0,
-        result_x_max=100.0,
-        result_y_min=-2.0,
-        result_y_max=100.0,
+        field_res_x=args.res_x,
+        field_res_y=args.res_y,
         grid_x_min=args.x_min,
         grid_x_max=args.x_max,
         depth_max=args.depth_max,
