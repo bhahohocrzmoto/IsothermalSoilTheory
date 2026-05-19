@@ -280,14 +280,18 @@ class IsothermalSuperpositionUI:
         self.sources: list[Source2D] = []
         self.next_id = 1
 
-        # Layout: main axes + dedicated colorbar axes (so colorbar doesn't
-        # shrink the main axes on every redraw).
-        self.fig = plt.figure(figsize=(11.5, 7.5))
+        # Two figures with matched styling:
+        #   - grid figure: geometry/grid/source placement
+        #   - thermal figure: contourf + isotherm
+        self.fig_grid = plt.figure(figsize=(10.5, 7.5))
+        self.ax_grid = self.fig_grid.add_subplot(111)
+
+        self.fig_thermal = plt.figure(figsize=(11.5, 7.5))
         gs = GridSpec(1, 2, width_ratios=[40, 1], wspace=0.08,
                       left=0.07, right=0.95, top=0.92, bottom=0.10)
-        self.ax = self.fig.add_subplot(gs[0])
-        self.cax = self.fig.add_subplot(gs[1])
-        self.cax.set_visible(False)
+        self.ax_thermal = self.fig_thermal.add_subplot(gs[0])
+        self.cax_thermal = self.fig_thermal.add_subplot(gs[1])
+        self.cax_thermal.set_visible(False)
 
         # Cached evaluation grid (allocated once)
         self._eval_grid: Optional[tuple[np.ndarray, np.ndarray]] = None
@@ -295,9 +299,11 @@ class IsothermalSuperpositionUI:
         # Cached last contour paths (for save_all)
         self._last_contour_paths: list = []
 
-        # Event bindings
-        self.fig.canvas.mpl_connect("button_press_event", self._on_click)
-        self.fig.canvas.mpl_connect("key_press_event", self._on_key)
+        # Event bindings (both windows)
+        self.fig_grid.canvas.mpl_connect("button_press_event", self._on_click)
+        self.fig_grid.canvas.mpl_connect("key_press_event", self._on_key)
+        self.fig_thermal.canvas.mpl_connect("button_press_event", self._on_click)
+        self.fig_thermal.canvas.mpl_connect("key_press_event", self._on_key)
 
         # Initial draw (empty)
         self.redraw()
@@ -349,7 +355,7 @@ class IsothermalSuperpositionUI:
         return True
 
     def _on_click(self, event):
-        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+        if event.inaxes not in (self.ax_grid, self.ax_thermal) or event.xdata is None or event.ydata is None:
             return
         if event.button == 1:  # left
             snapped = self._snap_in_grid(event.xdata, event.ydata)
@@ -374,24 +380,33 @@ class IsothermalSuperpositionUI:
         elif k == "s":
             self.save_all()
         elif k == "escape":
-            plt.close(self.fig)
+            plt.close(self.fig_grid)
+            plt.close(self.fig_thermal)
 
     # ------------------------------- drawing --------------------------------
 
     def redraw(self):
-        self.ax.clear()
-        self.cax.clear()
-        self.cax.set_visible(False)
-        self._init_axes()
-        self._draw_grid_dots()
-        self._draw_field()           # also draws 5 K contour, populates cax
-        self._draw_ground_line()
-        self._draw_sources_and_images()
+        self.ax_grid.clear()
+        self.ax_thermal.clear()
+        self.cax_thermal.clear()
+        self.cax_thermal.set_visible(False)
+
+        self._init_axes(self.ax_grid)
+        self._init_axes(self.ax_thermal)
+
+        self._draw_grid_dots(self.ax_grid)
+        self._draw_grid_dots(self.ax_thermal)
+        self._draw_field()           # thermal-only; also draws 5 K contour, populates cax
+        self._draw_ground_line(self.ax_grid)
+        self._draw_ground_line(self.ax_thermal)
+        self._draw_sources_and_images(self.ax_grid)
+        self._draw_sources_and_images(self.ax_thermal)
         self._draw_title_and_status()
         self._draw_controls_footer()
-        self.fig.canvas.draw_idle()
+        self.fig_grid.canvas.draw_idle()
+        self.fig_thermal.canvas.draw_idle()
 
-    def _init_axes(self):
+    def _init_axes(self, ax):
         c = self.cfg
         # Above-ground strip: just enough to show every image marker, with a
         # 0.3 m floor for a visible reference strip when nothing is placed
@@ -402,32 +417,32 @@ class IsothermalSuperpositionUI:
         else:
             max_src_depth = 0.0
         strip = max(0.3, min(max_src_depth + 0.2, 0.5 * c["depth_max"]))
-        self.ax.set_xlim(c["grid_x_min"] - 0.05, c["grid_x_max"] + 0.05)
-        self.ax.set_ylim(c["depth_max"] + 0.05, -strip)
-        self.ax.set_xlabel("x [m]")
-        self.ax.set_ylabel("depth [m]   (positive downward)")
-        self.ax.set_aspect("equal", adjustable="box")
-        self.ax.grid(False)
+        ax.set_xlim(c["grid_x_min"] - 0.05, c["grid_x_max"] + 0.05)
+        ax.set_ylim(c["depth_max"] + 0.05, -strip)
+        ax.set_xlabel("x [m]")
+        ax.set_ylabel("depth [m]   (positive downward)")
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(False)
 
-    def _draw_grid_dots(self):
+    def _draw_grid_dots(self, ax):
         c = self.cfg
         xs = np.arange(c["grid_x_min"], c["grid_x_max"] + 0.5 * c["grid_step"], c["grid_step"])
         ds = np.arange(c["depth_min"] + c["grid_step"],
                        c["depth_max"] + 0.5 * c["grid_step"],
                        c["grid_step"])
         XX, DD = np.meshgrid(xs, ds)
-        self.ax.plot(XX, DD, ".", color="0.85", markersize=1.5, zorder=1)
+        ax.plot(XX, DD, ".", color="0.85", markersize=1.5, zorder=1)
 
-    def _draw_ground_line(self):
+    def _draw_ground_line(self, ax):
         c = self.cfg
-        self.ax.axhline(0.0, color="green", linewidth=1.4, zorder=4)
-        self.ax.text(c["grid_x_max"], -0.04, " ground (depth = 0)",
+        ax.axhline(0.0, color="green", linewidth=1.4, zorder=4)
+        ax.text(c["grid_x_max"], -0.04, " ground (depth = 0)",
                      color="green", va="bottom", ha="right", fontsize=8, zorder=4)
 
     def _draw_field(self):
         c = self.cfg
         if not self.sources:
-            self.cax.set_visible(False)
+            self.cax_thermal.set_visible(False)
             self._last_contour_paths = []
             return
 
@@ -440,16 +455,16 @@ class IsothermalSuperpositionUI:
         vmax_show = max(vmax_clip, 1.5 * c["epsilon_K"])
         theta_disp = np.clip(theta, 0.0, vmax_show)
 
-        cf = self.ax.contourf(X, D, theta_disp, levels=20, cmap="inferno", zorder=2)
-        self.cax.set_visible(True)
-        cbar = self.fig.colorbar(cf, cax=self.cax)
+        cf = self.ax_thermal.contourf(X, D, theta_disp, levels=20, cmap="inferno", zorder=2)
+        self.cax_thermal.set_visible(True)
+        cbar = self.fig_thermal.colorbar(cf, cax=self.cax_thermal)
         cbar.set_label(r"Temperature rise $\theta$ [K]")
 
         # Target isotherm
-        cs = self.ax.contour(X, D, theta, levels=[c["epsilon_K"]],
+        cs = self.ax_thermal.contour(X, D, theta, levels=[c["epsilon_K"]],
                               colors="cyan", linewidths=2.0, zorder=5)
         try:
-            self.ax.clabel(cs, fmt={c["epsilon_K"]: f"{c['epsilon_K']:g} K"},
+            self.ax_thermal.clabel(cs, fmt={c["epsilon_K"]: f"{c['epsilon_K']:g} K"},
                             fontsize=9)
         except Exception:
             pass
@@ -458,7 +473,7 @@ class IsothermalSuperpositionUI:
 
         # Domain-too-small warning
         if any(self._contour_touches_plot_edge(p.vertices) for p in self._last_contour_paths):
-            self.ax.text(
+            self.ax_thermal.text(
                 c["grid_x_min"] + 0.05, c["depth_max"] - 0.08,
                 "⚠  ε-contour reaches plot edge — domain may be too small.\n"
                 "    Increase --depth-max / --x-min / --x-max or lower --q.",
@@ -480,24 +495,24 @@ class IsothermalSuperpositionUI:
             np.any(np.abs(verts[:, 1] - d1) < tol_d)
         )
 
-    def _draw_sources_and_images(self):
+    def _draw_sources_and_images(self, ax):
         c = self.cfg
         for s in self.sources:
             # Real source
-            self.ax.plot(s.x_m, s.depth_m, "o",
+            ax.plot(s.x_m, s.depth_m, "o",
                           markersize=9, color="white", markeredgecolor="black",
                           zorder=7)
-            self.ax.text(s.x_m + 0.04, s.depth_m, f"#{s.id}",
+            ax.text(s.x_m + 0.04, s.depth_m, f"#{s.id}",
                           fontsize=7, color="white",
                           bbox=dict(facecolor="black", edgecolor="none", alpha=0.6, pad=1),
                           va="center", zorder=8)
             # Image (drawn at depth_ui = -depth_source, i.e. above ground;
             # clipped naturally if outside view limits)
-            self.ax.plot(s.x_m, -s.depth_m, "x",
+            ax.plot(s.x_m, -s.depth_m, "x",
                           markersize=9, color="cyan", markeredgewidth=1.5,
                           zorder=7)
         if self.sources:
-            self.ax.plot([], [], "x", color="cyan", markeredgewidth=1.5,
+            ax.plot([], [], "x", color="cyan", markeredgewidth=1.5,
                           markersize=9, label="image sources (above ground)")
 
     def _draw_title_and_status(self):
@@ -510,7 +525,8 @@ class IsothermalSuperpositionUI:
             f"T_amb = {c['T_amb']:.1f} °C    "
             f"ε = {c['epsilon_K']:.2f} K  →  isotherm at T = {T_target:.2f} °C"
         )
-        self.ax.set_title(title, fontsize=9, pad=14)
+        self.ax_grid.set_title("Grid / source layout", fontsize=10, pad=14)
+        self.ax_thermal.set_title(title, fontsize=9, pad=14)
 
         # Summary text in plot corner
         if self.sources:
@@ -525,8 +541,8 @@ class IsothermalSuperpositionUI:
                 f"sources inside contour: {inside} / {len(self.sources)}\n"
                 f"max |θ(x, depth=0)| : {gp_max:.2e} K  (image-method residual)"
             )
-            self.ax.text(
-                0.01, 0.98, summary, transform=self.ax.transAxes,
+            self.ax_thermal.text(
+                0.01, 0.98, summary, transform=self.ax_thermal.transAxes,
                 fontsize=8, color="white", va="top", ha="left",
                 bbox=dict(facecolor="black", edgecolor="0.4", alpha=0.7, pad=4),
                 zorder=9,
@@ -553,8 +569,10 @@ class IsothermalSuperpositionUI:
             "left-click: add  ·  right-click: remove nearest  ·  "
             "R: reset  ·  C/Enter: recompute  ·  S: save  ·  Esc: close"
         )
-        self.fig.text(0.5, 0.015, controls, fontsize=8, color="0.25",
-                       ha="center", va="bottom")
+        self.fig_grid.text(0.5, 0.015, controls, fontsize=8, color="0.25",
+                            ha="center", va="bottom")
+        self.fig_thermal.text(0.5, 0.015, controls, fontsize=8, color="0.25",
+                               ha="center", va="bottom")
 
     # ------------------------------- save -----------------------------------
 
@@ -567,7 +585,7 @@ class IsothermalSuperpositionUI:
 
         save_sources_csv(self.sources, srcs_csv)
         save_contours_csv(self._last_contour_paths, cnt_csv)
-        self.fig.savefig(png_path, dpi=200, bbox_inches="tight")
+        self.fig_thermal.savefig(png_path, dpi=200, bbox_inches="tight")
 
         print(f"Saved →\n  {srcs_csv}\n  {cnt_csv}\n  {png_path}")
         return {"sources_csv": srcs_csv, "contour_csv": cnt_csv, "png": png_path}
