@@ -297,6 +297,8 @@ class IsothermalSuperpositionUI:
         self.cax_thermal = self.fig_thermal.add_subplot(gs[1])
         self.cax_thermal.set_visible(False)
         self.epsilon_levels: list[float] = [self.cfg["epsilon_K"]]
+        self.fig_controls = plt.figure(figsize=(6.6, 5.0))
+        self.fig_controls.suptitle("Thermal Parameters", fontsize=11)
         self._build_controls_panel()
 
         # Cached evaluation grid (allocated once)
@@ -310,18 +312,19 @@ class IsothermalSuperpositionUI:
         self.fig_grid.canvas.mpl_connect("key_press_event", self._on_key)
         self.fig_thermal.canvas.mpl_connect("button_press_event", self._on_click)
         self.fig_thermal.canvas.mpl_connect("key_press_event", self._on_key)
+        self.fig_controls.canvas.mpl_connect("key_press_event", self._on_key)
 
         # Initial draw (empty)
         self.redraw()
 
     def _build_controls_panel(self):
-        """Technical-parameter input panel in the thermal figure."""
+        """Technical-parameter input panel in a dedicated controls window."""
         self._controls: dict[str, object] = {}
-        x0 = 0.78
-        w = 0.19
-        h = 0.045
-        gap = 0.012
-        y = 0.92
+        x0 = 0.10
+        w = 0.80
+        h = 0.10
+        gap = 0.03
+        y = 0.84
 
         # Parameters
         fields = [
@@ -331,7 +334,7 @@ class IsothermalSuperpositionUI:
             ("T_isothermal", "T_isothermal [°C]", f"{self.cfg['T_amb'] + self.cfg['epsilon_K']:.2f}"),
         ]
         for key, label, initial in fields:
-            ax = self.fig_thermal.add_axes([x0, y, w, h])
+            ax = self.fig_controls.add_axes([x0, y, w, h])
             box = TextBox(ax, label=label, initial=initial)
             box.on_submit(self._on_params_submit)
             self._controls[key] = box
@@ -340,12 +343,12 @@ class IsothermalSuperpositionUI:
         # Epsilon boxes (dynamic) + add button
         self._epsilon_axes: list = []
         self._epsilon_boxes: list[TextBox] = []
-        self._eps_y_start = y - 0.02
+        self._eps_y_start = y - 0.04
         self._eps_box_h = h
         self._eps_gap = gap
         self._eps_x0 = x0
         self._eps_w = w * 0.68
-        ax_add = self.fig_thermal.add_axes([x0 + w * 0.72, self._eps_y_start, w * 0.26, h])
+        ax_add = self.fig_controls.add_axes([x0 + w * 0.72, self._eps_y_start, w * 0.26, h])
         btn_add = Button(ax_add, "+")
         btn_add.on_clicked(self._on_add_epsilon)
         self._controls["add_eps_btn"] = btn_add
@@ -362,7 +365,7 @@ class IsothermalSuperpositionUI:
         y = self._eps_y_start
         for i, eps in enumerate(self.epsilon_levels):
             y_i = y - i * (self._eps_box_h + self._eps_gap)
-            ax = self.fig_thermal.add_axes([self._eps_x0, y_i, self._eps_w, self._eps_box_h])
+            ax = self.fig_controls.add_axes([self._eps_x0, y_i, self._eps_w, self._eps_box_h])
             box = TextBox(ax, label=f"ε{i+1} [K]", initial=f"{eps:.2f}")
             box.on_submit(self._on_epsilon_submit)
             self._epsilon_axes.append(ax)
@@ -492,6 +495,7 @@ class IsothermalSuperpositionUI:
         elif k == "escape":
             plt.close(self.fig_grid)
             plt.close(self.fig_thermal)
+            plt.close(self.fig_controls)
 
     # ------------------------------- drawing --------------------------------
 
