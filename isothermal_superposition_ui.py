@@ -78,20 +78,35 @@ from matplotlib.widgets import Button, TextBox
 # ---------------------------------------------------------------------------
 
 DEFAULTS = dict(
+    # ------------------------------ domain ------------------------------
+    # The computational domain is defined in UI coordinates:
+    #   x      : horizontal axis [m]
+    #   depth  : vertical axis [m], positive downward
+    # Large defaults are used for robust computation; the "grid view"
+    # window then shows a zoomed-in subset for convenient interaction.
     grid_x_min=-100.0,
     grid_x_max=100.0,
     depth_min=0.0,
     depth_max=100.0,
+    # Snap every click to this spacing (10 cm by default).
     grid_step=0.10,        # 10 cm snap
+    # Viewport for the source-placement window.
     grid_view_x_min=-2.0,
     grid_view_x_max=2.0,
     grid_view_depth_max=2.0,
+    # ---------------------------- physics ------------------------------
+    # Thermal conductivity used in the line-source model.
     k_soil=1.0,            # W/(m K)
+    # Ambient / reference temperature (used for displayed absolute T only).
     T_amb=20.0,            # °C
+    # Target isotherm level in temperature rise above ambient.
     epsilon_K=5.0,         # K
+    # Per-source heat rate. In this prototype, all sources share this value.
     q_source_Wpm=30.0,     # W/m, equal per source in v1
+    # Field sampling resolution for contouring.
     field_res_x=400,
     field_res_y=400,
+    # Radius floor to avoid log(0) / singular evaluation exactly at sources.
     r_cutoff_m=0.01,       # singularity cutoff
 )
 
@@ -223,6 +238,7 @@ def is_closed_path(verts: np.ndarray, gap_frac: float = 0.05) -> bool:
 
 
 def polygon_area(verts: np.ndarray) -> float:
+    """Shoelace polygon area for contour vertices in (x, depth) space."""
     if verts.shape[0] < 3:
         return 0.0
     x, y = verts[:, 0], verts[:, 1]
@@ -252,6 +268,8 @@ def point_in_polygon(x: float, y: float, verts: np.ndarray) -> bool:
 # ---------------------------------------------------------------------------
 
 def save_sources_csv(sources: Sequence[Source2D], path: Path) -> None:
+    # Persist every source with both UI and model y-sign convention so
+    # downstream tools can reconstruct either coordinate system.
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["source_id", "x_m", "depth_m", "y_model_m", "q_Wpm"])
@@ -266,6 +284,8 @@ def save_sources_csv(sources: Sequence[Source2D], path: Path) -> None:
 
 
 def save_contours_csv(paths, path: Path) -> None:
+    # Each path is a contour segment/polyline returned by matplotlib.
+    # We write every vertex to allow post-processing (area, re-plotting, CAD).
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["contour_id", "point_index", "x_m", "depth_m", "y_model_m"])
@@ -280,8 +300,11 @@ def save_contours_csv(paths, path: Path) -> None:
 
 class IsothermalSuperpositionUI:
     def __init__(self, cfg: dict):
+        # Mutable runtime configuration copy.
         self.cfg = cfg
+        # Selected real heat sources.
         self.sources: list[Source2D] = []
+        # Monotonic source ID generator for human-readable labels.
         self.next_id = 1
 
         # Two figures with matched styling:
@@ -319,6 +342,7 @@ class IsothermalSuperpositionUI:
 
     def _build_controls_panel(self):
         """Technical-parameter input panel in a dedicated controls window."""
+        # `self._controls` stores widget handles for later reads/writes.
         self._controls: dict[str, object] = {}
         x0 = 0.10
         w = 0.80
@@ -341,6 +365,7 @@ class IsothermalSuperpositionUI:
             y -= (h + gap)
 
         # Epsilon boxes (dynamic) + add button
+        # We allow multiple epsilon levels to draw several isotherms at once.
         self._epsilon_axes: list = []
         self._epsilon_boxes: list[TextBox] = []
         self._eps_y_start = y - 0.02
@@ -388,6 +413,9 @@ class IsothermalSuperpositionUI:
         self._controls["unselect_btn"] = btn_unsel
 
     def _rebuild_epsilon_boxes(self):
+        # Recreate epsilon text boxes from the current list.
+        # This is easier and more robust than trying to mutate boxes in place
+        # when the list length changes.
         if not hasattr(self, "epsilon_levels") or not self.epsilon_levels:
             self.epsilon_levels = [float(self.cfg.get("epsilon_K", 5.0))]
         for ax in self._epsilon_axes:
@@ -429,6 +457,7 @@ class IsothermalSuperpositionUI:
             self.redraw()
 
     def _on_params_submit(self, _text):
+        # Parse text boxes as floats, validate, then update model config.
         try:
             q = float(self._controls["q_source_Wpm"].text)
             k = float(self._controls["k_soil"].text)
@@ -452,6 +481,7 @@ class IsothermalSuperpositionUI:
     # ------------------------------- input ----------------------------------
 
     def _ensure_eval_grid(self):
+        # Allocate mesh once and reuse for performance while interacting.
         if self._eval_grid is None:
             c = self.cfg
             x = np.linspace(c["grid_x_min"], c["grid_x_max"], c["field_res_x"])
@@ -466,7 +496,8 @@ class IsothermalSuperpositionUI:
         d_s = snap_to_grid(depth, step)
         if not (c["grid_x_min"] - 1e-9 <= x_s <= c["grid_x_max"] + 1e-9):
             return None
-        # Reject sources at or above the ground plane (singular: source coincides with image)
+        # Reject sources at/above ground: in the image method that would place
+        # source and image at same location, creating a degenerate singular case.
         if d_s < step - 1e-9:
             return None
         if d_s > c["depth_max"] + 1e-9:
@@ -529,6 +560,8 @@ class IsothermalSuperpositionUI:
         return x_lo, x_hi, d_lo, d_hi
 
     def _iter_boundary_points(self, bounds: tuple[float, float, float, float]):
+        # Enumerate snapped grid points inside user-provided rectangle bounds.
+        # Used by Select/Unselect for fast block editing of source layout.
         x_lo, x_hi, d_lo, d_hi = bounds
         step = self.cfg["grid_step"]
         x0 = snap_to_grid(x_lo, step)
@@ -604,6 +637,8 @@ class IsothermalSuperpositionUI:
     # ------------------------------- drawing --------------------------------
 
     def redraw(self):
+        # Full redraw strategy (clear + redraw everything) keeps behavior simple
+        # and deterministic, which is valuable for scientific prototypes.
         self.ax_grid.clear()
         self.ax_thermal.clear()
         self.cax_thermal.clear()
@@ -652,6 +687,8 @@ class IsothermalSuperpositionUI:
         ax.grid(False)
 
     def _draw_grid_dots(self, ax):
+        # Draw permissible source points (depth starts at one grid step so
+        # the ground line itself is not selectable).
         c = self.cfg
         xs = np.arange(c["grid_x_min"], c["grid_x_max"] + 0.5 * c["grid_step"], c["grid_step"])
         ds = np.arange(c["depth_min"] + c["grid_step"],
@@ -676,7 +713,8 @@ class IsothermalSuperpositionUI:
         X, D = self._ensure_eval_grid()
         theta = theta_superposition_ui(X, D, self.sources, c["k_soil"], c["r_cutoff_m"])
 
-        # Cap colourbar so source singularities don't dominate the scale
+        # Cap colourbar so singular source peaks do not compress most of the
+        # physically interesting field into a dark low-contrast band.
         finite = theta[np.isfinite(theta)]
         vmax_clip = float(np.percentile(finite, 99.0))
         vmax_show = max(vmax_clip, 1.5 * c["epsilon_K"])
@@ -698,7 +736,8 @@ class IsothermalSuperpositionUI:
             pass
         self._last_contour_paths = get_paths_compat(cs)
 
-        # Domain-too-small warning
+        # Domain-too-small warning:
+        # if any contour touches side/bottom edges, contour may be truncated.
         if any(self._contour_touches_plot_edge(p.vertices) for p in self._last_contour_paths):
             self.ax_thermal.text(
                 c["grid_x_min"] + 0.05, c["depth_max"] - 0.08,
@@ -733,8 +772,8 @@ class IsothermalSuperpositionUI:
                           fontsize=7, color="white",
                           bbox=dict(facecolor="black", edgecolor="none", alpha=0.6, pad=1),
                           va="center", zorder=8)
-            # Image (drawn at depth_ui = -depth_source, i.e. above ground;
-            # clipped naturally if outside view limits)
+            # Image marker (cyan x): plotted above ground at negative depth UI.
+            # This is only a visual cue; physical computation uses y_model.
             ax.plot(s.x_m, -s.depth_m, "x",
                           markersize=9, color="cyan", markeredgewidth=1.5,
                           zorder=7)
@@ -810,6 +849,7 @@ class IsothermalSuperpositionUI:
     # ------------------------------- save -----------------------------------
 
     def save_all(self, outdir: str = "out") -> dict:
+        # Save the current interactive state/results in analysis-friendly form.
         outdir = Path(outdir)
         outdir.mkdir(parents=True, exist_ok=True)
         srcs_csv = outdir / "selected_sources.csv"
