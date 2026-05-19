@@ -77,10 +77,10 @@ from matplotlib.gridspec import GridSpec
 # ---------------------------------------------------------------------------
 
 DEFAULTS = dict(
-    grid_x_min=-2.0,
-    grid_x_max=2.0,
+    grid_x_min=-100.0,
+    grid_x_max=100.0,
     depth_min=0.0,
-    depth_max=2.0,
+    depth_max=100.0,
     grid_step=0.10,        # 10 cm snap
     k_soil=1.0,            # W/(m K)
     T_amb=20.0,            # °C
