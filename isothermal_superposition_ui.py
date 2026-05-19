@@ -70,6 +70,7 @@ from typing import Optional, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
+from matplotlib.widgets import Button, TextBox
 
 
 # ---------------------------------------------------------------------------
@@ -295,12 +296,14 @@ class IsothermalSuperpositionUI:
         self.ax_thermal = self.fig_thermal.add_subplot(gs[0])
         self.cax_thermal = self.fig_thermal.add_subplot(gs[1])
         self.cax_thermal.set_visible(False)
+        self._build_controls_panel()
 
         # Cached evaluation grid (allocated once)
         self._eval_grid: Optional[tuple[np.ndarray, np.ndarray]] = None
 
         # Cached last contour paths (for save_all)
         self._last_contour_paths: list = []
+        self.epsilon_levels: list[float] = [self.cfg["epsilon_K"]]
 
         # Event bindings (both windows)
         self.fig_grid.canvas.mpl_connect("button_press_event", self._on_click)
@@ -310,6 +313,102 @@ class IsothermalSuperpositionUI:
 
         # Initial draw (empty)
         self.redraw()
+
+    def _build_controls_panel(self):
+        """Technical-parameter input panel in the thermal figure."""
+        self._controls: dict[str, object] = {}
+        x0 = 0.78
+        w = 0.19
+        h = 0.045
+        gap = 0.012
+        y = 0.92
+
+        # Parameters
+        fields = [
+            ("q_source_Wpm", "q [W/m]", f"{self.cfg['q_source_Wpm']:.2f}"),
+            ("k_soil", "k [W/(m K)]", f"{self.cfg['k_soil']:.3g}"),
+            ("T_amb", "T_amb [°C]", f"{self.cfg['T_amb']:.2f}"),
+            ("T_isothermal", "T_isothermal [°C]", f"{self.cfg['T_amb'] + self.cfg['epsilon_K']:.2f}"),
+        ]
+        for key, label, initial in fields:
+            ax = self.fig_thermal.add_axes([x0, y, w, h])
+            box = TextBox(ax, label=label, initial=initial)
+            box.on_submit(self._on_params_submit)
+            self._controls[key] = box
+            y -= (h + gap)
+
+        # Epsilon boxes (dynamic) + add button
+        self._epsilon_axes: list = []
+        self._epsilon_boxes: list[TextBox] = []
+        self._eps_y_start = y - 0.02
+        self._eps_box_h = h
+        self._eps_gap = gap
+        self._eps_x0 = x0
+        self._eps_w = w * 0.68
+        ax_add = self.fig_thermal.add_axes([x0 + w * 0.72, self._eps_y_start, w * 0.26, h])
+        btn_add = Button(ax_add, "+")
+        btn_add.on_clicked(self._on_add_epsilon)
+        self._controls["add_eps_btn"] = btn_add
+        self._controls["add_eps_ax"] = ax_add
+        self._rebuild_epsilon_boxes()
+
+    def _rebuild_epsilon_boxes(self):
+        for ax in self._epsilon_axes:
+            ax.remove()
+        self._epsilon_axes = []
+        self._epsilon_boxes = []
+        y = self._eps_y_start
+        for i, eps in enumerate(self.epsilon_levels):
+            y_i = y - i * (self._eps_box_h + self._eps_gap)
+            ax = self.fig_thermal.add_axes([self._eps_x0, y_i, self._eps_w, self._eps_box_h])
+            box = TextBox(ax, label=f"ε{i+1} [K]", initial=f"{eps:.2f}")
+            box.on_submit(self._on_epsilon_submit)
+            self._epsilon_axes.append(ax)
+            self._epsilon_boxes.append(box)
+        add_ax = self._controls.get("add_eps_ax")
+        if add_ax is not None:
+            add_ax.set_position([self._eps_x0 + self._eps_w + 0.01, y, 0.05, self._eps_box_h])
+
+    def _on_add_epsilon(self, _event):
+        self.epsilon_levels.append(self.epsilon_levels[-1] if self.epsilon_levels else 5.0)
+        self._rebuild_epsilon_boxes()
+        self.redraw()
+
+    def _on_epsilon_submit(self, _text):
+        vals = []
+        for box in self._epsilon_boxes:
+            try:
+                v = float(box.text)
+                if v > 0.0 and math.isfinite(v):
+                    vals.append(v)
+            except ValueError:
+                continue
+        if vals:
+            self.epsilon_levels = vals
+            self.cfg["epsilon_K"] = vals[0]
+            self.redraw()
+
+    def _on_params_submit(self, _text):
+        try:
+            q = float(self._controls["q_source_Wpm"].text)
+            k = float(self._controls["k_soil"].text)
+            t_amb = float(self._controls["T_amb"].text)
+            t_iso = float(self._controls["T_isothermal"].text)
+            if not (k > 0 and math.isfinite(q) and math.isfinite(t_amb) and math.isfinite(t_iso)):
+                return
+            self.cfg["q_source_Wpm"] = q
+            self.cfg["k_soil"] = k
+            self.cfg["T_amb"] = t_amb
+            eps_from_t = t_iso - t_amb
+            if eps_from_t > 0:
+                self.cfg["epsilon_K"] = eps_from_t
+                if self.epsilon_levels:
+                    self.epsilon_levels[0] = eps_from_t
+            for s in self.sources:
+                s.q_Wpm = q
+            self.redraw()
+        except Exception:
+            return
 
     # ------------------------------- input ----------------------------------
 
@@ -401,7 +500,7 @@ class IsothermalSuperpositionUI:
 
         self._draw_grid_dots(self.ax_grid)
         self._draw_grid_dots(self.ax_thermal)
-        self._draw_field()           # thermal-only; also draws 5 K contour, populates cax
+        self._draw_field()           # thermal-only; also draws epsilon contours, populates cax
         self._draw_ground_line(self.ax_grid)
         self._draw_ground_line(self.ax_thermal)
         self._draw_sources_and_images(self.ax_grid)
@@ -474,15 +573,15 @@ class IsothermalSuperpositionUI:
         cbar = self.fig_thermal.colorbar(cf, cax=self.cax_thermal)
         cbar.set_label(r"Temperature rise $\theta$ [K]")
 
-        # Target isotherm
-        cs = self.ax_thermal.contour(X, D, theta, levels=[c["epsilon_K"]],
-                              colors="cyan", linewidths=2.0, zorder=5)
+        # Target isotherms (one or more epsilon levels)
+        eps_levels = sorted({float(v) for v in self.epsilon_levels if v > 0})
+        cs = self.ax_thermal.contour(
+            X, D, theta, levels=eps_levels, colors="cyan", linewidths=2.0, zorder=5
+        )
         try:
-            self.ax_thermal.clabel(cs, fmt={c["epsilon_K"]: f"{c['epsilon_K']:g} K"},
-                            fontsize=9)
+            self.ax_thermal.clabel(cs, fmt={v: f"{v:g} K" for v in eps_levels}, fontsize=9)
         except Exception:
             pass
-
         self._last_contour_paths = get_paths_compat(cs)
 
         # Domain-too-small warning
@@ -532,12 +631,13 @@ class IsothermalSuperpositionUI:
     def _draw_title_and_status(self):
         c = self.cfg
         n = len(self.sources)
+        eps_txt = ", ".join(f"{v:g}" for v in self.epsilon_levels)
         T_target = c["T_amb"] + c["epsilon_K"]
         title = (
             f"n = {n}    q = {c['q_source_Wpm']:.2f} W/m    "
             f"k = {c['k_soil']:.3g} W/(m·K)    "
             f"T_amb = {c['T_amb']:.1f} °C    "
-            f"ε = {c['epsilon_K']:.2f} K  →  isotherm at T = {T_target:.2f} °C"
+            f"ε = [{eps_txt}] K  →  primary isotherm at T = {T_target:.2f} °C"
         )
         self.ax_grid.set_title("Grid / source layout", fontsize=10, pad=14)
         self.ax_thermal.set_title(title, fontsize=9, pad=14)
