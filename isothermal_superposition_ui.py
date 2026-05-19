@@ -82,6 +82,9 @@ DEFAULTS = dict(
     depth_min=0.0,
     depth_max=100.0,
     grid_step=0.10,        # 10 cm snap
+    grid_view_x_min=-2.0,
+    grid_view_x_max=2.0,
+    grid_view_depth_max=2.0,
     k_soil=1.0,            # W/(m K)
     T_amb=20.0,            # °C
     epsilon_K=5.0,         # K
@@ -391,8 +394,8 @@ class IsothermalSuperpositionUI:
         self.cax_thermal.clear()
         self.cax_thermal.set_visible(False)
 
-        self._init_axes(self.ax_grid)
-        self._init_axes(self.ax_thermal)
+        self._init_axes(self.ax_grid, is_grid_view=True)
+        self._init_axes(self.ax_thermal, is_grid_view=False)
 
         self._draw_grid_dots(self.ax_grid)
         self._draw_grid_dots(self.ax_thermal)
@@ -406,7 +409,7 @@ class IsothermalSuperpositionUI:
         self.fig_grid.canvas.draw_idle()
         self.fig_thermal.canvas.draw_idle()
 
-    def _init_axes(self, ax):
+    def _init_axes(self, ax, is_grid_view: bool):
         c = self.cfg
         # Above-ground strip: just enough to show every image marker, with a
         # 0.3 m floor for a visible reference strip when nothing is placed
@@ -417,8 +420,17 @@ class IsothermalSuperpositionUI:
         else:
             max_src_depth = 0.0
         strip = max(0.3, min(max_src_depth + 0.2, 0.5 * c["depth_max"]))
-        ax.set_xlim(c["grid_x_min"] - 0.05, c["grid_x_max"] + 0.05)
-        ax.set_ylim(c["depth_max"] + 0.05, -strip)
+        if is_grid_view:
+            x_min = c["grid_view_x_min"]
+            x_max = c["grid_view_x_max"]
+            depth_max = c["grid_view_depth_max"]
+        else:
+            x_min = c["grid_x_min"]
+            x_max = c["grid_x_max"]
+            depth_max = c["depth_max"]
+
+        ax.set_xlim(x_min - 0.05, x_max + 0.05)
+        ax.set_ylim(depth_max + 0.05, -strip)
         ax.set_xlabel("x [m]")
         ax.set_ylabel("depth [m]   (positive downward)")
         ax.set_aspect("equal", adjustable="box")
