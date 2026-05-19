@@ -445,8 +445,6 @@ class IsothermalSuperpositionUI:
                 if self.epsilon_levels:
                     self.epsilon_levels[0] = eps_from_t
                     self._epsilon_boxes[0].set_val(f"{eps_from_t:.2f}")
-            for s in self.sources:
-                s.q_Wpm = q
             self.redraw()
         except Exception:
             return
@@ -497,6 +495,23 @@ class IsothermalSuperpositionUI:
         self.next_id += 1
         return True
 
+    def _select_or_update_source_q(self, x_s: float, d_s: float, q_value: float) -> bool:
+        """Ensure point is selected and assign it the current selection q."""
+        for s in self.sources:
+            if abs(s.x_m - x_s) < 1e-9 and abs(s.depth_m - d_s) < 1e-9:
+                if abs(s.q_Wpm - q_value) < 1e-12:
+                    return False
+                s.q_Wpm = q_value
+                return True
+        self.sources.append(Source2D(
+            id=self.next_id,
+            x_m=x_s,
+            depth_m=d_s,
+            q_Wpm=q_value,
+        ))
+        self.next_id += 1
+        return True
+
     def _parse_bounds(self) -> Optional[tuple[float, float, float, float]]:
         try:
             x_lo = float(self._controls["bound_x_min"].text)
@@ -533,8 +548,9 @@ class IsothermalSuperpositionUI:
         if bounds is None:
             return
         changed = False
+        q_value = float(self.cfg["q_source_Wpm"])
         for x_s, d_s in self._iter_boundary_points(bounds):
-            changed = self._add_source(x_s, d_s) or changed
+            changed = self._select_or_update_source_q(x_s, d_s, q_value) or changed
         if changed:
             self.redraw()
 
