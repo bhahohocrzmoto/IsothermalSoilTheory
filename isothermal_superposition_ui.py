@@ -84,10 +84,10 @@ DEFAULTS = dict(
     #   depth  : vertical axis [m], positive downward
     # Large defaults are used for robust computation; the "grid view"
     # window then shows a zoomed-in subset for convenient interaction.
-    grid_x_min=-100.0,
-    grid_x_max=100.0,
+    grid_x_min=-10.0,
+    grid_x_max=10.0,
     depth_min=0.0,
-    depth_max=100.0,
+    depth_max=10.0,
     # Snap every click to this spacing (10 cm by default).
     grid_step=0.10,        # 10 cm snap
     # Viewport for the source-placement window.
