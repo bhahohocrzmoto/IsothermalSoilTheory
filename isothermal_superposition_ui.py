@@ -297,7 +297,7 @@ class IsothermalSuperpositionUI:
         self.cax_thermal = self.fig_thermal.add_subplot(gs[1])
         self.cax_thermal.set_visible(False)
         self.epsilon_levels: list[float] = [self.cfg["epsilon_K"]]
-        self.fig_controls = plt.figure(figsize=(6.6, 5.0))
+        self.fig_controls = plt.figure(figsize=(8.8, 6.6))
         self.fig_controls.suptitle("Thermal Parameters", fontsize=11)
         self._build_controls_panel()
 
@@ -322,9 +322,9 @@ class IsothermalSuperpositionUI:
         self._controls: dict[str, object] = {}
         x0 = 0.10
         w = 0.80
-        h = 0.08
-        gap = 0.025
-        y = 0.84
+        h = 0.050
+        gap = 0.018
+        y = 0.88
 
         # Parameters
         fields = [
@@ -343,12 +343,12 @@ class IsothermalSuperpositionUI:
         # Epsilon boxes (dynamic) + add button
         self._epsilon_axes: list = []
         self._epsilon_boxes: list[TextBox] = []
-        self._eps_y_start = y - 0.04
+        self._eps_y_start = y - 0.02
         self._eps_box_h = h
         self._eps_gap = gap
         self._eps_x0 = x0
-        self._eps_w = w * 0.68
-        ax_add = self.fig_controls.add_axes([x0 + w * 0.72, self._eps_y_start, w * 0.26, h])
+        self._eps_w = w * 0.62
+        ax_add = self.fig_controls.add_axes([x0 + w * 0.65, self._eps_y_start, w * 0.18, h])
         btn_add = Button(ax_add, "+")
         btn_add.on_clicked(self._on_add_epsilon)
         self._controls["add_eps_btn"] = btn_add
@@ -356,14 +356,15 @@ class IsothermalSuperpositionUI:
         self._rebuild_epsilon_boxes()
 
         # Batch select/unselect region controls
-        y_bounds = 0.07
-        bw = 0.24
-        bh = 0.07
-        bgap = 0.03
+        y_bounds = 0.12
+        bh = 0.055
+        btn_y = 0.03
+        btn_h = 0.065
+        btn_w = (w - 0.03) / 2.0
 
         bound_fields = [
-            ("bound_x_min", "x lower [m]", f"{self.cfg['grid_view_x_min']:.2f}", [x0, y_bounds + bh + 0.01, w * 0.48, bh]),
-            ("bound_x_max", "x upper [m]", f"{self.cfg['grid_view_x_max']:.2f}", [x0 + w * 0.52, y_bounds + bh + 0.01, w * 0.48, bh]),
+            ("bound_x_min", "x lower [m]", f"{self.cfg['grid_view_x_min']:.2f}", [x0, y_bounds + bh + 0.012, w * 0.48, bh]),
+            ("bound_x_max", "x upper [m]", f"{self.cfg['grid_view_x_max']:.2f}", [x0 + w * 0.52, y_bounds + bh + 0.012, w * 0.48, bh]),
             ("bound_d_min", "depth lower [m]", f"{self.cfg['grid_step']:.2f}", [x0, y_bounds, w * 0.48, bh]),
             ("bound_d_max", "depth upper [m]", f"{self.cfg['grid_view_depth_max']:.2f}", [x0 + w * 0.52, y_bounds, w * 0.48, bh]),
         ]
@@ -372,8 +373,8 @@ class IsothermalSuperpositionUI:
             box = TextBox(ax, label=label, initial=initial)
             self._controls[key] = box
 
-        ax_sel = self.fig_controls.add_axes([x0, 0.01, bw, bh])
-        ax_unsel = self.fig_controls.add_axes([x0 + bw + bgap, 0.01, bw, bh])
+        ax_sel = self.fig_controls.add_axes([x0, btn_y, btn_w, btn_h])
+        ax_unsel = self.fig_controls.add_axes([x0 + btn_w + 0.03, btn_y, btn_w, btn_h])
         btn_sel = Button(ax_sel, "Select")
         btn_unsel = Button(ax_unsel, "Unselect")
         btn_sel.on_clicked(self._on_select_bounds)
@@ -398,7 +399,7 @@ class IsothermalSuperpositionUI:
             self._epsilon_boxes.append(box)
         add_ax = self._controls.get("add_eps_ax")
         if add_ax is not None:
-            add_ax.set_position([self._eps_x0 + self._eps_w + 0.01, y, 0.05, self._eps_box_h])
+            add_ax.set_position([self._eps_x0 + self._eps_w + 0.02, y, 0.09, self._eps_box_h])
 
     def _on_add_epsilon(self, _event):
         self.epsilon_levels.append(self.epsilon_levels[-1] if self.epsilon_levels else 5.0)
