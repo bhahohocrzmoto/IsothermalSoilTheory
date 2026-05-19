@@ -358,7 +358,9 @@ class IsothermalSuperpositionUI:
         return True
 
     def _on_click(self, event):
-        if event.inaxes not in (self.ax_grid, self.ax_thermal) or event.xdata is None or event.ydata is None:
+        # Figure 2 (thermal field) is intentionally read-only: users may pan/zoom
+        # to inspect artefacts without accidentally mutating the source layout.
+        if event.inaxes != self.ax_grid or event.xdata is None or event.ydata is None:
             return
         if event.button == 1:  # left
             snapped = self._snap_in_grid(event.xdata, event.ydata)
@@ -577,13 +579,17 @@ class IsothermalSuperpositionUI:
         return max(areas) if areas else 0.0
 
     def _draw_controls_footer(self):
-        controls = (
+        controls_grid = (
             "left-click: add  ·  right-click: remove nearest  ·  "
             "R: reset  ·  C/Enter: recompute  ·  S: save  ·  Esc: close"
         )
-        self.fig_grid.text(0.5, 0.015, controls, fontsize=8, color="0.25",
+        controls_thermal = (
+            "Figure is read-only (no add/remove on click)  ·  "
+            "R: reset  ·  C/Enter: recompute  ·  S: save  ·  Esc: close"
+        )
+        self.fig_grid.text(0.5, 0.015, controls_grid, fontsize=8, color="0.25",
                             ha="center", va="bottom")
-        self.fig_thermal.text(0.5, 0.015, controls, fontsize=8, color="0.25",
+        self.fig_thermal.text(0.5, 0.015, controls_thermal, fontsize=8, color="0.25",
                                ha="center", va="bottom")
 
     # ------------------------------- save -----------------------------------
