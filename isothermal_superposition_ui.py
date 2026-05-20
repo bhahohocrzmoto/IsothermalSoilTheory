@@ -87,24 +87,24 @@ DEFAULTS = dict(
     grid_x_min=-10.0,
     grid_x_max=10.0,
     depth_min=0.0,
-    depth_max=10.0,
+    depth_max=5.0,
     # Snap every click to this spacing (10 cm by default).
-    grid_step=0.10,        # 10 cm snap
+    grid_step=0.025,        # 10 cm snap
     # Viewport for the source-placement window.
     grid_view_x_min=-2.0,
     grid_view_x_max=2.0,
     grid_view_depth_max=2.0,
     # ---------------------------- physics ------------------------------
     # Thermal conductivity used in the line-source model.
-    k_soil=1.0,            # W/(m K)
+    k_soil=1.2,            # W/(m K)
     # Ambient / reference temperature (used for displayed absolute T only).
-    T_amb=20.0,            # °C
+    T_amb=30.0,            # °C
     # Target isotherm level in temperature rise above ambient.
     epsilon_K=5.0,         # K
     # Per-source heat rate. In this prototype, all sources share this value.
     q_source_Wpm=30.0,     # W/m, equal per source in v1
     # Field sampling resolution for contouring.
-    field_res_x=400,
+    field_res_x=1600,
     field_res_y=400,
     # Radius floor to avoid log(0) / singular evaluation exactly at sources.
     r_cutoff_m=0.01,       # singularity cutoff
